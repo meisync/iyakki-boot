@@ -1,0 +1,2 @@
+# IYAKKI: which RAM disk the next start reads (written by the first stage after a failed fast start and by the running system when the fast tree is ready)
+initramfs initrd followkernel

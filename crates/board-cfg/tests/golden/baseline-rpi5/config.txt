@@ -1,0 +1,13 @@
+# IYAKKI boot configuration for the Raspberry Pi 5. Written by iyakki-usb; an update rewrites it. Do not edit by hand: put your own
+# lines in config-user.txt (included last).
+[all]
+arm_64bit=1
+kernel=kernel8.img
+device_tree=bcm2712-rpi-5-b.dtb
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+enable_uart=1
+uart_2ndstage=1
+disable_splash=1
+include iyakki-boot.txt
+include config-user.txt

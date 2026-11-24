@@ -1,0 +1,1 @@
+console=tty1 console=ttyAMA10,115200 rootwait panic=10 iyakki.board=rpi5 iyakki.ssh=1

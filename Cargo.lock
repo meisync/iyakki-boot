@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "board-cfg"
+version = "0.1.0"
+dependencies = [
+ "boot-core",
+]
+
+[[package]]
 name = "boot-core"
 version = "0.1.0"
 

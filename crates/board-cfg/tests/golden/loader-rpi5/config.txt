@@ -1,0 +1,12 @@
+# IYAKKI boot configuration for the Raspberry Pi 5 with the IYAKKI boot loader. Written by iyakki-usb; an update rewrites it. Do not edit by hand: put your own
+# lines in config-user.txt (included last). The firmware starts U-Boot, U-Boot starts the loader (EFI/BOOT/BOOTAA64.EFI), the loader starts the kernel.
+[all]
+arm_64bit=1
+kernel=u-boot.bin
+device_tree=bcm2712-rpi-5-b.dtb
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+enable_uart=1
+uart_2ndstage=1
+disable_splash=1
+include config-user.txt

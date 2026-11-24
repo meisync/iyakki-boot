@@ -54,13 +54,19 @@ class Vm:
         if not vars_path:
             shutil.copyfile(a.ovmf_vars, self.vars)  # a fresh copy: the original is never written
         open(self.log, "w").close()
-        kvm = os.access("/dev/kvm", os.R_OK | os.W_OK)
-        cmd = [a.qemu, "-machine", machine, "-m", "2048", "-smp", "2", "-display", "none", "-no-user-config", "-nodefaults",
-               "-accel", "kvm" if kvm else "tcg", "-cpu", "host" if kvm else "max",
+        arm = a.arch == "aarch64"
+        # aarch64 runs under TCG on an x86 host (no KVM for a foreign architecture); the virt board has no keyboard, so a USB one is added
+        kvm = os.access("/dev/kvm", os.R_OK | os.W_OK) and not arm
+        cmd = [a.qemu, "-machine", "virt" if arm else machine, "-m", "2048", "-smp", "2", "-display", "none", "-no-user-config", "-nodefaults",
+               "-accel", "kvm" if kvm else "tcg", "-cpu", "host" if kvm else ("cortex-a72" if arm else "max"),  # edk2 hangs on `-cpu max` under TCG
                "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={a.ovmf_code}",
                "-drive", f"if=pflash,format=raw,unit=1,file={self.vars}",
                "-serial", f"file:{self.log}", "-monitor", f"unix:{self.sock},server,nowait",
-               "-vga", "std" if vga else "none"]
+               ]
+        if arm:
+            cmd += ["-device", "qemu-xhci", "-device", "usb-kbd"] + (["-device", "virtio-gpu-pci"] if vga else [])
+        else:
+            cmd += ["-vga", "std" if vga else "none"]
         for i, (path, snap) in enumerate(disks):
             cmd += ["-drive", f"file={path},format=raw,if=none,id=d{i},snapshot={'on' if snap else 'off'}",
                     "-device", f"virtio-blk-pci,drive=d{i}" + (",bootindex=1" if i == 0 else "")]
@@ -160,7 +166,10 @@ class Suite:
         return files
 
     def boot_files(self):
-        return [(self.a.boot_efi, "/EFI/BOOT/BOOTX64.EFI")]
+        return [(self.a.boot_efi, "/EFI/BOOT/" + self.boot_name())]
+
+    def boot_name(self):
+        return "BOOTAA64.EFI" if self.a.arch == "aarch64" else "BOOTX64.EFI"
 
     def run(self, name, fn):
         t0 = time.time()
@@ -244,14 +253,20 @@ def t_default(s):
 
 def t_real_kernel(s):
     a = s.a
-    if not a.lean_image:
-        raise Skip("no --lean-image")
     k = os.path.join(s.dir, "bzImage")
     i = os.path.join(s.dir, "initrd-lean")
-    for src, dst in (("/boot/bzImage", k), ("/boot/initrd-lean", i)):
-        subprocess.run([sys.executable, "-I", os.path.join(HERE, "fatdisk.py"), "get", a.lean_image, "1", src, dst], check=True)
-    cfg = "timeout 0\nentry real\n  title Real kernel\n  kernel /real/vmlinuz\n  initrd /real/initrd.img\n  cmdline console=ttyS0 loglevel=7 panic=-1\n  default\n"
-    d = s.disk("real", s.boot_files() + [(k, "/real/vmlinuz"), (i, "/real/initrd.img")], [(cfg, "/boot.cfg")], size_mb=64)
+    if a.real_kernel and a.real_initrd:
+        # a kernel and an initramfs given as plain files (the aarch64 case: an `Image` with the EFI stub and a cpio archive)
+        shutil.copyfile(a.real_kernel, k)
+        shutil.copyfile(a.real_initrd, i)
+    elif a.lean_image:
+        for src, dst in (("/boot/bzImage", k), ("/boot/initrd-lean", i)):
+            subprocess.run([sys.executable, "-I", os.path.join(HERE, "fatdisk.py"), "get", a.lean_image, "1", src, dst], check=True)
+    else:
+        raise Skip("no --lean-image and no --real-kernel/--real-initrd")
+    con = "ttyAMA0" if a.arch == "aarch64" else "ttyS0"
+    cfg = f"timeout 0\nentry real\n  title Real kernel\n  kernel /real/vmlinuz\n  initrd /real/initrd.img\n  cmdline console={con}{" earlycon" if a.arch == "aarch64" else ""} loglevel=7 panic=-1{(" " + a.real_cmdline) if a.real_cmdline else ""}\n  default\n"
+    d = s.disk("real", s.boot_files() + [(k, "/real/vmlinuz"), (i, "/real/initrd.img")], [(cfg, "/boot.cfg")], size_mb=max(64, (os.path.getsize(k) + os.path.getsize(i)) // (1 << 20) * 6 // 5 + 24))
     vm = s.vm("real", [(d, True)])
     try:
         need(vm.wait_for(r"start: real kernel=/real/vmlinuz", 90), "loader did not start the entry")
@@ -396,7 +411,7 @@ def t_chain(s):
     cfg = "timeout 30\nscan yes\nentry current\n  title Current system\n  kernel /{tree}/vmlinuz\n  initrd /{tree}/initrd.img\n  cmdline console=ttyS0\n  default\n"
     d1 = s.disk("e1", s.boot_files() + s.trees(), [(cfg, "/boot.cfg")])
     osr = "NAME=\"Fake Windows\"\\nPRETTY_NAME=\"Fake Windows Test\"\\n"
-    d2 = s.disk("e2", [(s.a.test_efi, "/EFI/Microsoft/Boot/bootmgfw.efi"), (s.a.test_efi, "/EFI/Other/loader.efi"), (s.a.test_efi, "/EFI/BOOT/BOOTX64.EFI")],
+    d2 = s.disk("e2", [(s.a.test_efi, "/EFI/Microsoft/Boot/bootmgfw.efi"), (s.a.test_efi, "/EFI/Other/loader.efi"), (s.a.test_efi, "/EFI/BOOT/" + s.boot_name())],
                 [(osr, "/etc/os-release")])
     before = hashlib.sha256(open(d2, "rb").read()).hexdigest()
     vm = s.vm("e", [(d1, True), (d2, False)])
@@ -407,8 +422,9 @@ def t_chain(s):
         ids = [i[1] for i in items]
         need(any("bootmgfw.efi" in i for i in ids), f"bootmgfw.efi not found by the scan: {items}")
         need(any("/efi/other/loader.efi" in i for i in ids), f"EFI/Other/loader.efi not found: {items}")
-        need(any("/efi/boot/bootx64.efi" in i for i in ids), f"fallback loader of the other disk not found: {items}")
-        need(not any(i.endswith("efi:boot:/efi/boot/bootx64.efi") for i in ids), f"the loader listed itself: {items}")
+        fb = "/efi/boot/" + s.boot_name().lower()
+        need(any(fb in i for i in ids), f"fallback loader of the other disk not found: {items}")
+        need(not any(i.endswith("efi:boot:" + fb) for i in ids), f"the loader listed itself: {items}")
         need(len(items) == 4, f"expected 4 items (1 configured + 3 found), got {items}")
         idx = [n for n, i, _ in items if "bootmgfw.efi" in i][0]
         titles = {i: ti for _, i, ti in items}
@@ -433,6 +449,8 @@ def t_chain(s):
 
 
 def t_secure_boot(s):
+    if s.a.arch == "aarch64":
+        raise Skip("the graphics and Secure Boot tests run on the x86_64 firmware only for now")
     """Negative check only: with the Secure Boot firmware and its enrolled variable store, the unsigned loader is refused."""
     a = s.a
     code, vars_ = a.ovmf_code.replace("_4M.fd", "_4M.snakeoil.fd"), a.ovmf_vars.replace("_4M.fd", "_4M.snakeoil.fd")
@@ -459,6 +477,8 @@ def read_ppm(path):
 
 
 def t_graphics(s):
+    if s.a.arch == "aarch64":
+        raise Skip("the graphics and Secure Boot tests run on the x86_64 firmware only for now")
     cfg = "timeout 60\nentry current\n  title Current system\n  kernel /{tree}/vmlinuz\n  initrd /{tree}/initrd.img\n  default\nentry seed\n  title Seed system\n  kernel /seed/vmlinuz\n"
     d = s.disk("g", s.boot_files() + s.trees(), [(cfg, "/boot.cfg")])
     vm = s.vm("g", [(d, True)], vga=True, extra=["-device", "qemu-xhci", "-device", "usb-mouse"])
@@ -582,6 +602,8 @@ def splash_cfg(extra, timeout=0):
 
 
 def t_splash(s):
+    if s.a.arch == "aarch64":
+        raise Skip("the graphics and Secure Boot tests run on the x86_64 firmware only for now")
     logo = os.path.join(s.dir, "logo.bmp")
     make_bmp(logo, 200, 100, lambda x, y: RED if x < 100 else GREEN)
     big = os.path.join(s.dir, "big.bmp")
@@ -708,6 +730,8 @@ def t_splash(s):
 
 
 def t_levels(s):
+    if s.a.arch == "aarch64":
+        raise Skip("the graphics and Secure Boot tests run on the x86_64 firmware only for now")
     """The menu under the logo at 1280x800 and, when the firmware offers the mode, at 1920x1080 and 640x480."""
     t_levels_at(s, "i", None)
     for w, h in ((1920, 1080), (640, 480)):
@@ -724,7 +748,7 @@ def t_levels_at(s, name, res):
     cfg = ("timeout 30\nsplash /logo.bmp\nsplash-bg #204080\nscan no\n"
            "entry current\n  title IYAKKI\n  kernel /{tree}/vmlinuz\n  initrd /{tree}/initrd.img\n  cmdline console=ttyS0\n  default\n"
            "entry safe\n  title IYAKKI (safe graphics)\n  kernel /seed/vmlinuz\n  more\n"
-           "entry prev\n  title Previous version\n  kind chain\n  kernel /EFI/BOOT/BOOTX64.EFI\n  requires /EFI/nothing/loader.prev.efi\n  more\n"
+           "entry prev\n  title Previous version\n  kind chain\n  kernel /EFI/BOOT/" + s.boot_name() + "\n  requires /EFI/nothing/loader.prev.efi\n  more\n"
            "entry rescue\n  title Recovery\n  kernel /rescue/vmlinuz\n  more\n")
     d = s.disk(name, s.boot_files() + s.trees() + [(logo, "/logo.bmp")], [(cfg, "/boot.cfg")])
     if res:
@@ -912,15 +936,20 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--boot-efi", required=True)
     p.add_argument("--test-efi", required=True)
-    p.add_argument("--qemu", default="qemu-system-x86_64")
+    p.add_argument("--arch", choices=("x86_64", "aarch64"), default="x86_64")
+    p.add_argument("--qemu", default="")
     p.add_argument("--ovmf-code", default="/usr/share/OVMF/OVMF_CODE_4M.fd")
     p.add_argument("--ovmf-vars", default="/usr/share/OVMF/OVMF_VARS_4M.fd")
     p.add_argument("--scratch", required=True)
     p.add_argument("--lean-image", default="")
+    p.add_argument("--real-kernel", default="", help="a kernel file for the real-kernel test (instead of --lean-image)")
+    p.add_argument("--real-cmdline", default="", help="extra words for the real kernel's command line (for example iyakki.selftest=1)")
+    p.add_argument("--real-initrd", default="", help="the initramfs that goes with --real-kernel")
     p.add_argument("--initrd-marker", default="", help="regex of a line the initrd's init prints (real-kernel test)")
     p.add_argument("--only", default="")
     p.add_argument("--keep", action="store_true")
     a = p.parse_args()
+    a.qemu = a.qemu or ("qemu-system-aarch64" if a.arch == "aarch64" else "qemu-system-x86_64")
     for f in (a.boot_efi, a.test_efi, a.ovmf_code, a.ovmf_vars):
         if not os.path.isfile(f):
             raise SystemExit(f"missing file: {f}")

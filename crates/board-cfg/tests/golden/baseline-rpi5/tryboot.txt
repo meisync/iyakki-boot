@@ -1,0 +1,12 @@
+# IYAKKI trial boot of an update: read ONCE by the firmware after `reboot "0 tryboot"`, never by a normal start.
+[all]
+arm_64bit=1
+kernel=kernel8-next.img
+device_tree=bcm2712-rpi-5-b.dtb
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+enable_uart=1
+uart_2ndstage=1
+disable_splash=1
+initramfs initrd-lean-next followkernel
+include config-user.txt
