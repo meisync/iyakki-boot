@@ -79,6 +79,16 @@ tools/sign-test.sh target/x86_64-unknown-uefi/release/boot-uefi.efi           # 
 The config file name is a constant at the top of `crates/boot-uefi/src/main.rs` (`/boot.cfg`); set the build variable
 `BOOT_CONFIG_PATH` to use another name. Variables use the project's own vendor GUID (`crates/boot-uefi/src/vars.rs`).
 
+## aarch64 (Raspberry Pi 5, Kria KV260)
+
+The same code builds for `aarch64-unknown-uefi` (`cargo build --release --target aarch64-unknown-uefi -p boot-uefi -p test-efi`; the removable-media name is `EFI/BOOT/BOOTAA64.EFI`).
+`tools/qemu-test.sh --arch aarch64` runs the QEMU tests under `qemu-system-aarch64 -M virt` with the AAVMF (edk2) firmware (TCG, `-cpu cortex-a72`; the graphics, splash
+and Secure Boot tests are x86_64 only for now); `--real-kernel Image --real-initrd rootfs.cpio.gz` starts a real arm64 kernel (it must carry the EFI stub).
+`crates/board-cfg` is the one board table and the one configuration for those boards (host tool, no dependencies): it writes the card's boot files, the loader's
+`boot.cfg` and the Pi's U-Boot `config.txt` (`board-cfg rpi5|kv260 baseline|loader OUTDIR`), proven byte for byte against the files of the tested baseline cards.
+`tools/make-arm-variant.sh` makes a loader card from a baseline card image (no root, mtools only) and `tools/qemu_variant_test.py` boots such a card in QEMU.
+Not proven: U-Boot's EFI on the real boards (the Pi 5 starts U-Boot as `kernel=u-boot.bin`; the KV260's own U-Boot reaches the EFI path when the card has no `extlinux.conf`).
+
 Run the host tests (own workspace, no dependencies):
 
 ```
