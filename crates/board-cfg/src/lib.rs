@@ -49,6 +49,8 @@ pub struct Board {
     pub seed_mode: bool,
     /// The program U-Boot starts as the loader's EFI path on the card (the removable-media name for aarch64).
     pub efi_path: &'static str,
+    /// The display overlay of `config.txt`. The Pi 5 firmware has no `overlay_map.dtb`, so it needs the file that carries the `-pi5` name.
+    pub display_overlay: &'static str,
 }
 
 pub const RPI5: Board = Board {
@@ -61,10 +63,11 @@ pub const RPI5: Board = Board {
     initrd_full: Some("initrd"),
     screen_console: "console=tty1",
     serial_console: "console=ttyAMA10,115200",
-    cmdline_tail: "rootwait panic=10",
+    cmdline_tail: "rootwait panic=10 cgroup_enable=memory cgroup_memory=1",
     board_word: true,
     seed_mode: true,
     efi_path: "EFI/BOOT/BOOTAA64.EFI",
+    display_overlay: "vc4-kms-v3d-pi5",
 };
 
 pub const KV260: Board = Board {
@@ -81,6 +84,7 @@ pub const KV260: Board = Board {
     board_word: false,
     seed_mode: false,
     efi_path: "EFI/BOOT/BOOTAA64.EFI",
+    display_overlay: "",
 };
 
 /// The table of boards.
@@ -255,7 +259,8 @@ pub fn pi_config_txt(b: &Board) -> String {
     t.push_str("[all]\narm_64bit=1\n");
     let _ = writeln!(t, "kernel={}", b.kernel);
     let _ = writeln!(t, "device_tree={}", b.dtb.unwrap_or(""));
-    t.push_str("dtoverlay=vc4-kms-v3d\nmax_framebuffers=2\nenable_uart=1\nuart_2ndstage=1\ndisable_splash=1\n");
+    let _ = writeln!(t, "dtoverlay={}", b.display_overlay);
+    t.push_str("max_framebuffers=2\nenable_uart=1\nuart_2ndstage=1\ndisable_splash=1\n");
     t.push_str("include iyakki-boot.txt\ninclude config-user.txt\n");
     t
 }
@@ -270,7 +275,8 @@ pub fn pi_config_txt_loader(b: &Board) -> String {
     t.push_str("[all]\narm_64bit=1\n");
     let _ = writeln!(t, "kernel={UBOOT_BIN}");
     let _ = writeln!(t, "device_tree={}", b.dtb.unwrap_or(""));
-    t.push_str("dtoverlay=vc4-kms-v3d\nmax_framebuffers=2\nenable_uart=1\nuart_2ndstage=1\ndisable_splash=1\n");
+    let _ = writeln!(t, "dtoverlay={}", b.display_overlay);
+    t.push_str("max_framebuffers=2\nenable_uart=1\nuart_2ndstage=1\ndisable_splash=1\n");
     t.push_str("include config-user.txt\n");
     t
 }
@@ -283,7 +289,8 @@ pub fn pi_tryboot_txt(b: &Board) -> String {
     let stem = b.kernel.strip_suffix(".img").unwrap_or(b.kernel);
     let _ = writeln!(t, "kernel={stem}-next.img");
     let _ = writeln!(t, "device_tree={}", b.dtb.unwrap_or(""));
-    t.push_str("dtoverlay=vc4-kms-v3d\nmax_framebuffers=2\nenable_uart=1\nuart_2ndstage=1\ndisable_splash=1\n");
+    let _ = writeln!(t, "dtoverlay={}", b.display_overlay);
+    t.push_str("max_framebuffers=2\nenable_uart=1\nuart_2ndstage=1\ndisable_splash=1\n");
     let _ = writeln!(t, "initramfs {}-next followkernel", b.initrd);
     t.push_str("include config-user.txt\n");
     t

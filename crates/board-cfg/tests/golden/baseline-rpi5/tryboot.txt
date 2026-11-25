@@ -3,7 +3,7 @@
 arm_64bit=1
 kernel=kernel8-next.img
 device_tree=bcm2712-rpi-5-b.dtb
-dtoverlay=vc4-kms-v3d
+dtoverlay=vc4-kms-v3d-pi5
 max_framebuffers=2
 enable_uart=1
 uart_2ndstage=1

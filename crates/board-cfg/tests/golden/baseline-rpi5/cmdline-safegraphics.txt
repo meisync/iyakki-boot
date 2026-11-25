@@ -1,1 +1,1 @@
-console=tty1 console=ttyAMA10,115200 rootwait panic=10 iyakki.board=rpi5 modprobe.blacklist=vc4,v3d
+console=tty1 console=ttyAMA10,115200 rootwait panic=10 cgroup_enable=memory cgroup_memory=1 iyakki.board=rpi5 modprobe.blacklist=vc4,v3d
