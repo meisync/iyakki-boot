@@ -341,12 +341,14 @@ pub fn board_file(b: &Board) -> String {
 /// fails too, stops and waits for the person. A `BootConfirm` variable written by the running system refills the tries.
 pub fn loader_boot_cfg(b: &Board) -> String {
     let mut t = String::new();
+    // the KV260's own U-Boot tree gives no display on carrier card rev B (KI-1031): every entry names the rev B tree on the card
+    let fdt = if b.id == BoardId::Kv260 { "  fdt /dtb/zynqmp-smk-k26-revA-sck-kv-g-revB.dtb\n" } else { "" };
     let _ = writeln!(t, "# IYAKKI boot loader menu for the {}. Written by board-cfg (one board table, one configuration for every board).", b.title);
     t.push_str("# The first level is the normal start and \"More options\"; the other starts are on the second level. Paths are on the boot volume.\n");
     t.push_str("# nine counted starts, like the PC images: a start the running system never confirms (the confirmation is a UEFI variable the system writes\n# at run time; whether U-Boot keeps it is still to be shown on a real board) costs one, then the previous entry starts, then the menu waits\ntimeout 0\ntries 9\nscan no\n");
     for m in Mode::for_board(b) {
         let id = if m == Mode::Normal { "iyakki" } else { m.name() };
-        let _ = write!(t, "\nentry {id}\n  title {}\n  kind linux\n  kernel /{}\n  initrd /{}\n  cmdline {}\n", m.title(), b.kernel, b.initrd, cmdline(b, m));
+        let _ = write!(t, "\nentry {id}\n  title {}\n  kind linux\n  kernel /{}\n  initrd /{}\n  cmdline {}\n{fdt}", m.title(), b.kernel, b.initrd, cmdline(b, m));
         if m == Mode::Normal {
             t.push_str("  default\n");
             if b.initrd_full.is_some() {
@@ -359,7 +361,7 @@ pub fn loader_boot_cfg(b: &Board) -> String {
     if let Some(full) = b.initrd_full {
         let _ = write!(
             t,
-            "\nentry full\n  title Full start (slower; if the fast start does not work)\n  kind linux\n  kernel /{}\n  initrd /{full}\n  cmdline {}\n  more\n  requires /{full}\n",
+            "\nentry full\n  title Full start (slower; if the fast start does not work)\n  kind linux\n  kernel /{}\n  initrd /{full}\n  cmdline {}\n{fdt}  more\n  requires /{full}\n",
             b.kernel,
             cmdline(b, Mode::Normal)
         );

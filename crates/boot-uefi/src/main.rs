@@ -42,6 +42,8 @@ const KEY_WINDOW_MS: usize = 200;
 const MENU_HEADER: &str = "Choose what to start";
 /// Largest initrd accepted, in bytes.
 const MAX_INITRD: usize = 1 << 31;
+/// Largest device tree accepted, in bytes.
+const MAX_FDT: usize = 1 << 20;
 /// The variable that forces the text menu even when a graphics output exists (set it from the OS when debugging a screen).
 const TEXT_ONLY_VAR: &str = "BootText";
 /// Where the log of this run is written on the boot volume: beside the configuration file, so a stick plugged into another
@@ -205,13 +207,17 @@ fn start_item(c: &Ctx, item: &Item, tree: &str) -> Result<Status, String> {
                     }
                     say!("start: {} kernel={} tree={} initrds={} cmdline={}\n", item.id, kernel, tree, initrds.len(), line);
                     let initrd = read_initrds(c, &initrds)?;
+                    let fdt = match &e.fdt {
+                        Some(p) => Some(c.vol.read(p, MAX_FDT).ok_or_else(|| format!("device tree {p} cannot be read"))?),
+                        None => None,
+                    };
                     save_log(&c.vol, "about to start"); // the file now ends with the start line above: a kernel that never draws is still named
-                    launch::start(c.vol.handle, &kernel, Some(&line), initrd)
+                    launch::start(c.vol.handle, &kernel, Some(&line), initrd, fdt)
                 }
                 Kind::Chain => {
                     say!("start: {} chain={}\n", item.id, kernel);
                     save_log(&c.vol, "about to start"); // the file now ends with the start line above: a kernel that never draws is still named
-                    launch::start(c.vol.handle, &kernel, None, None)
+                    launch::start(c.vol.handle, &kernel, None, None, None)
                 }
                 Kind::Firmware => Err(String::from("a firmware entry is not started like a kernel")),
             }
@@ -229,13 +235,13 @@ fn start_item(c: &Ctx, item: &Item, tree: &str) -> Result<Status, String> {
         Action::Chain(discover::Target::BootVolume { path }) if !c.found.iter().any(|f| f.disc.target == discover::Target::BootVolume { path: path.clone() }) => {
             say!("start: {} chain={}\n", item.id, path);
             save_log(&c.vol, "about to start"); // the file now ends with the start line above: a kernel that never draws is still named
-            launch::start(c.vol.handle, path, None, None)
+            launch::start(c.vol.handle, path, None, None, None)
         }
         Action::Chain(t) => {
             let f = c.found.iter().find(|f| f.disc.target == *t).ok_or_else(|| String::from("this kind of system cannot be started by the UEFI loader"))?;
             say!("start: {} chain={}\n", item.id, f.path);
             save_log(&c.vol, "about to start"); // the file now ends with the start line above: a kernel that never draws is still named
-            launch::start(f.volume, &f.path, None, None)
+            launch::start(f.volume, &f.path, None, None, None)
         }
     }
 }

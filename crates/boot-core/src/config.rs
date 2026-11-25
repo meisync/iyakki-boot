@@ -105,6 +105,8 @@ pub struct Entry {
     /// Ids of entries that start in place of this one when the boot state says "previous version" (`previous`, the first one that is
     /// listed and startable wins). Empty: this entry has no previous version of its own.
     pub previous: Vec<String>,
+    /// Device tree file on the boot volume (`fdt`): the kernel gets this tree in place of the firmware's own (U-Boot boards).
+    pub fdt: Option<String>,
 }
 
 impl Entry {
@@ -301,6 +303,7 @@ impl Config {
             more: false,
             requires: None,
             previous: Vec::new(),
+            fdt: None,
         };
         let mut c = Config::empty();
         c.timeout_secs = 0;
@@ -396,6 +399,7 @@ impl Config {
                     more: false,
                     requires: None,
                     previous: Vec::new(),
+                    fdt: None,
                 });
                 *block = Block::Entry;
                 return Ok(());
@@ -466,6 +470,12 @@ impl Config {
                             return Err(ErrorKind::TooMany);
                         }
                         e.initrd.push(val.to_string());
+                    }
+                    "fdt" => {
+                        if !valid_path(val) {
+                            return Err(ErrorKind::BadValue("path: absolute, no spaces, no .."));
+                        }
+                        e.fdt = Some(val.to_string());
                     }
                     "cmdline" => {
                         cmdline::validate(val).map_err(|_| ErrorKind::BadValue("cmdline: forbidden character or too long"))?;
@@ -555,6 +565,16 @@ override efi:0:1:/efi/x/y.efi\n  name Renamed\n  hidden no\n  order 3\n";
         assert!(l.fallback && l.config.splash.is_none());
         let long = format!("splash /{}\n{base}", "a".repeat(MAX_PATH));
         assert!(Config::parse(&long).is_err());
+    }
+
+    #[test]
+    fn fdt_names_the_device_tree_file_of_an_entry() {
+        let c = Config::parse("entry a\n kernel /k\n fdt /dtb/x.dtb\nentry b\n kernel /k\n").unwrap();
+        assert_eq!(c.entries[0].fdt.as_deref(), Some("/dtb/x.dtb"));
+        assert_eq!(c.entries[1].fdt, None);
+        for bad in ["fdt", "fdt x.dtb", "fdt /a/../b", "fdt /a b"] {
+            assert!(Config::parse(&format!("entry a\n kernel /k\n {bad}\n")).is_err(), "{bad}");
+        }
     }
 
     #[test]

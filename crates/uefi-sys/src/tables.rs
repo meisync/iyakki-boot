@@ -310,8 +310,8 @@ pub struct BootServices {
     /// `LocateDevicePath`.
     pub locate_device_path:
         unsafe extern "efiapi" fn(protocol: *const Guid, path: *mut *mut DevicePathProtocol, device: *mut Handle) -> Status,
-    /// `InstallConfigurationTable` (unused).
-    pub install_configuration_table: *const c_void,
+    /// `InstallConfigurationTable`: add, replace (same GUID) or remove (null table) an entry of the system configuration table.
+    pub install_configuration_table: unsafe extern "efiapi" fn(guid: *const Guid, table: *mut c_void) -> Status,
     /// `LoadImage`.
     pub load_image: unsafe extern "efiapi" fn(
         boot_policy: Boolean,

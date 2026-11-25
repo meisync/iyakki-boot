@@ -3,6 +3,7 @@
 //! other loader. The firmware does the signature check; this file never skips it.
 
 use crate::fs::file_device_path;
+use crate::say;
 use crate::sys::{bs, image, protocol, ucs2};
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -78,23 +79,25 @@ fn remove_initrd(h: InitrdHandle) {
 /// Load the image at `path` on the volume `volume` and start it. `options` becomes its load options (UCS-2: the kernel's command
 /// line); `initrd` is offered through the initrd protocol while it runs. `Ok(status)` means the image came back (a kernel
 /// that started never does); `Err(text)` means it could not be loaded or prepared.
-pub fn start(volume: Handle, path: &str, options: Option<&str>, initrd: Option<Vec<u8>>) -> Result<Status, String> {
+pub fn start(volume: Handle, path: &str, options: Option<&str>, initrd: Option<Vec<u8>>, fdt: Option<Vec<u8>>) -> Result<Status, String> {
     // under shim the firmware's check alone refuses a kernel signed with the owner's MOK key: let shim look too (see shim.rs)
     let hooked = crate::shim::install(crate::sys::secure_boot());
-    let r = start_inner(volume, path, options, initrd);
+    let r = start_inner(volume, path, options, initrd, fdt);
     if hooked {
         crate::shim::remove();
     }
     r
 }
 
-fn start_inner(volume: Handle, path: &str, options: Option<&str>, initrd: Option<Vec<u8>>) -> Result<Status, String> {
+fn start_inner(volume: Handle, path: &str, options: Option<&str>, initrd: Option<Vec<u8>>, fdt: Option<Vec<u8>>) -> Result<Status, String> {
+    say!("launch: LoadImage {path}\n");
     let dp = file_device_path(volume, path).ok_or_else(|| String::from("cannot build the device path of the file"))?;
     let mut img: Handle = null_mut();
     let s = unsafe { (bs().load_image)(0, image(), dp.as_ptr() as *const DevicePathProtocol, core::ptr::null(), 0, &mut img) };
     if s.is_error() {
         return Err(alloc::format!("LoadImage {path}: {}", status_text(s)));
     }
+    say!("launch: image loaded; publishing the initrd\n");
     let opts: Vec<u16> = options.map(ucs2).unwrap_or_default();
     if let Some(li) = protocol::<LoadedImage>(img, &LOADED_IMAGE_PROTOCOL_GUID) {
         if options.is_some() {
@@ -114,6 +117,20 @@ fn start_inner(volume: Handle, path: &str, options: Option<&str>, initrd: Option
         },
         None => None,
     };
+    if let Some(d) = fdt {
+        // the tree stays in memory for the kernel's whole life: the stub reads it through the configuration table and the kernel keeps it
+        let p = Box::leak(d.into_boxed_slice()).as_mut_ptr() as *mut c_void;
+        let s = unsafe { (bs().install_configuration_table)(&DTB_TABLE_GUID, p) };
+        if s.is_error() {
+            if let Some(h) = ih {
+                remove_initrd(h);
+            }
+            unsafe { (bs().unload_image)(img) };
+            return Err(alloc::format!("cannot install the device tree: {}", status_text(s)));
+        }
+        say!("launch: the entry's device tree replaces the firmware's\n");
+    }
+    say!("launch: StartImage (the kernel's EFI stub runs next)\n");
     unsafe { (bs().set_watchdog_timer)(0, 0, 0, core::ptr::null()) };
     let mut exit_size = 0usize;
     let mut exit_data: *mut Char16 = null_mut();
@@ -121,6 +138,7 @@ fn start_inner(volume: Handle, path: &str, options: Option<&str>, initrd: Option
     if !exit_data.is_null() {
         unsafe { (bs().free_pool)(exit_data as *mut c_void) };
     }
+    say!("launch: StartImage returned: {}\n", status_text(s));
     if let Some(h) = ih {
         remove_initrd(h);
     }
