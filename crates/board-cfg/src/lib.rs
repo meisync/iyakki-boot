@@ -298,8 +298,8 @@ pub fn pi_tryboot_txt(b: &Board) -> String {
 
 /// The extlinux entries of the KV260 baseline: label, menu text, the device tree file (`None`: U-Boot's own), the words after the base line.
 const KV_ENTRIES: [(&str, &str, Option<&str>, &str); 6] = [
-    ("iyakki", "IYAKKI", None, " panic=20"),
-    ("iyakki-dtb", "IYAKKI (device tree from the SD card)", Some("/dtb/zynqmp-smk-k26-revA-sck-kv-g-revB.dtb"), " panic=20"),
+    ("iyakki-dtb", "IYAKKI (carrier card rev B, default)", Some("/dtb/zynqmp-smk-k26-revA-sck-kv-g-revB.dtb"), " panic=20"),
+    ("iyakki", "IYAKKI (the board's own device tree: may show no display)", None, " panic=20"),
     ("iyakki-dtb-reva", "IYAKKI (device tree for carrier card rev A)", Some("/dtb/zynqmp-smk-k26-revA-sck-kv-g-revA.dtb"), " panic=20"),
     ("iyakki-selftest", "IYAKKI (verbose, boot self-test, then power off)", None, " iyakki.selftest=1"),
     ("iyakki-ssh", "IYAKKI (remote diagnostics, SSH with keys only)", None, " iyakki.ssh=1"),
@@ -310,12 +310,12 @@ const KV_ENTRIES: [(&str, &str, Option<&str>, &str); 6] = [
 pub fn kv_extlinux_conf(b: &Board) -> String {
     let mut t = String::new();
     t.push_str("# Read by the board's own U-Boot (primary boot firmware in the SOM's QSPI flash) from the SD card's FIRST bootable FAT partition:\n");
-    t.push_str("# /extlinux/extlinux.conf (also found in /boot/extlinux/). No `fdt` line on purpose: U-Boot then hands the kernel ITS OWN device tree,\n");
-    t.push_str("# which it has already completed with the SOM and carrier-card data. The entry \"iyakki-dtb\" uses the kernel's own copy instead (try it\n");
-    t.push_str("# only if the first entry shows no display or no Ethernet). Serial: PS UART1 = ttyPS1, 115200 8N1 (the micro-USB connector).\n");
-    t.push_str("# The LAST console= word becomes /dev/console, so the serial port is last. Menu times are in tenths of a second.\n");
-    let _ = writeln!(t, "menu title IYAKKI ({})", b.title);
-    t.push_str("default iyakki\ntimeout 30\nprompt 1\n");
+    t.push_str("# /extlinux/extlinux.conf (also found in /boot/extlinux/). The DEFAULT entry \"iyakki-dtb\" passes the device tree for carrier card\n");
+    t.push_str("# rev B from the SD card: on the KV260 starter kit with rev B the board's own tree (entry \"iyakki\", no `fdt` line) gives no display\n");
+    t.push_str("# (KI-1031). The entry \"iyakki\" keeps U-Boot's own device tree, for a board where it works. Serial: PS UART1 = ttyPS1, 115200 8N1\n");
+    t.push_str("# (the micro-USB connector). The LAST console= word becomes /dev/console, so the serial port is last. Menu times are in tenths of a second.\n");
+let _ = writeln!(t, "menu title IYAKKI ({})", b.title);
+    t.push_str("default iyakki-dtb\ntimeout 30\nprompt 1\n");
     let base = format!("{} {} {}", b.screen_console, b.serial_console, b.cmdline_tail);
     // the baseline's words end with `panic=20` for the first three and have no panic word for the rest: split the tail the same way
     let base_no_panic = base.strip_suffix(" panic=20").unwrap_or(&base).to_string();
